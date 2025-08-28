@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Camera-Driven Golf Sim (Speedy-style)</title>
+<style>
+  :root{
+    --bg:#0e1116;--panel:#161b22;--ink:#e6edf3;--muted:#9fb0c0;--accent:#32d583;--accent2:#12a97a
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+  header{padding:14px 18px;background:#0a0d12;border-bottom:1px solid #1f2430;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0;font-weight:800}
+  header small{color:var(--muted)}
+  main{display:grid;grid-template-columns:420px 1fr;gap:14px;padding:14px;flex:1}
+  @media(max-width:1100px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid #1e2532;border-radius:14px;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+  .pad{padding:14px}
+  h2{font-size:16px;margin:0 0 10px 0}
+  label{display:block;margin:8px 0 4px;color:var(--muted);font-size:13px}
+  input,select,button{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2a3242;background:#0f1420;color:var(--ink);outline:none}
+  select{cursor:pointer}
+  button{background:linear-gradient(180deg,var(--accent),var(--accent2));border-color:#1aa36a;color:#072718;font-weight:800;cursor:pointer}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .row{display:flex;gap:10px;align-items:flex-end}
+  .row>*{flex:1}
+  .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#0f1625;border:1px solid #263044;font-size:12px;color:var(--muted)}
+  .tiny{font-size:11px;color:var(--muted)}
+  .divider{height:1px;background:#243045;margin:10px 0}
+  .list .row{justify-content:space-between;align-items:center}
+  #video{width:100%;border-radius:10px;border:1px dashed #344054;display:none;margin-top:8px}
+  #hiddenCanvas{display:none}
+  #log{max-height:170px;overflow:auto;border:1px solid #233146;border-radius:10px;padding:8px;background:#0d1320;font-size:12px}
+  /* Game side */
+  #stage{position:relative;width:100%;aspect-ratio:16/9;background:linear-gradient(180deg,#0c1d0f,#08200f);border-radius:14px;overflow:hidden;border:1px solid #273245}
+  #hud{position:absolute;top:10px;left:10px;display:flex;gap:6px;flex-wrap:wrap;z-index:8}
+  .badge{background:#0f1625;border:1px solid #203048;padding:6px 8px;border-radius:10px;font-size:12px}
+  #course{position:absolute;inset:0}
+  #simBall{position:absolute;width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid rgba(0,0,0,.25);box-shadow:0 0 0 2px rgba(0,0,0,.2);transform:translate(-50%,-50%);z-index:3}
+  #flag{position:absolute;width:8px;height:180px;background:#5e4730;left:82%;bottom:18%;transform:translateX(-50%);}
+  #flag::after{content:"";position:absolute;left:8px;top:0;width:0;height:0;border-top:12px solid transparent;border-bottom:12px solid transparent;border-left:18px solid #e74c3c}
+  .tee{position:absolute;width:26px;height:6px;border-radius:30px;background:#7a4222;left:10%;bottom:12%}
+  .fairway{position:absolute;left:0;right:0;bottom:10%;height:45%;background:radial-gradient(ellipse at 50% 60%,#1b5e20 0%,#144d19 50%,#0d3a12 90%)}
+  .bunker{position:absolute;width:100px;height:60px;background:#d1b48a;border-radius:50px;filter:brightness(.9);box-shadow:inset 0 0 12px rgba(0,0,0,.3)}
+  .bunker.b1{left:60%;bottom:20%}
+  .rough{position:absolute;inset:0;background:repeating-linear-gradient(45deg,transparent,transparent 10px,rgba(255,255,255,.02) 10px,rgba(255,255,255,.02) 20px);opacity:.15}
+  .toast{position:absolute;right:10px;top:10px;background:#111826;border:1px solid #223147;border-radius:10px;padding:10px;font-size:12px;max-width:280px}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Camera-Driven Golf Sim</h1>
+    <small class="pill">Speedy Golf–style UI • Real-time camera swing detection • Spin-influenced ball flight</small>
+  </header>
+
+  <main>
+    <!-- LEFT: Camera + Controls -->
+    <section class="card pad">
+      <h2>Player & Setup</h2>
+      <div class="row">
+        <div>
+          <label>Player name</label>
+          <input id="playerName" placeholder="Your name" value="Player 1"/>
+        </div>
+        <div>
+          <label>Club</label>
+          <select id="clubSelect">
+            <option value="driver">Driver</option>
+            <option value="wood3">3-Wood</option>
+            <option value="hybrid">Hybrid</option>
+            <option value="iron5">5-Iron</option>
+            <option value="iron8">8-Iron</option>
+            <option value="wedge">Wedge</option>
+            <option value="putter">Putter</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <label>Sensitivity</label>
+        <input id="sensitivity" type="range" min="0.5" max="2.0" value="1" step="0.05"/>
+        <div class="tiny">Higher = longer for the same camera motion</div>
+      </div>
+      <div class="divider"></div>
+      <h2>Camera</h2>
+      <div class="row">
+        <button id="arm">Arm Camera</button>
+        <button id="takeShot" disabled>Take Shot</button>
+      </div>
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="hiddenCanvas" width="640" height="360"></canvas>
+
+      <div class="divider"></div>
+      <h2>Shot Info</h2>
+      <div class="list">
+        <div class="row"><span class="pill">Peak proxy speed</span><div id="speed">–</div></div>
+        <div class="row"><span class="pill">Club speed</span><div id="clubSpeed">–</div></div>
+        <div class="row"><span class="pill">Ball speed</span><div id="ballSpeed">–</div></div>
+        <div class="row"><span class="pill">Carry</span><div id="carry">–</div></div>
+        <div class="row"><span class="pill">Total</span><div id="total">–</div></div>
+        <div class="row"><span class="pill">Spin (est.)</span><div id="spin">–</div></div>
+        <div class="row"><span class="pill">Spin Effect</span><div id="spinEffect">–</div></div>
+        <div class="row"><span class="pill">Result</span><div id="result">–</div></div>
+      </div>
+
+      <div class="divider"></div>
+      <h2>Round Log</h2>
+      <div id="log"></div>
+
+      <div class="tiny" style="margin-top:10px">
+        ⚠️ Use HTTPS or localhost for camera access (especially on mobile).
+      </div>
+    </section>
+
+    <!-- RIGHT: Game Stage -->
+    <section class="card pad" style="display:flex;flex-direction:column">
+      <div id="stage" class="card">
+        <div id="hud"></div>
+        <div id="course">
+          <div class="rough"></div>
+          <div class="fairway"></div>
+          <div class="tee"></div>
+          <div class="bunker b1"></div>
+          <div id="flag"></div>
+          <div id="simBall" style="left:10%;bottom:12%"></div>
+        </div>
+        <div class="toast" id="tip">Tip: aim phone toward the ball area; swing in frame. White pixels motion ≈ swing speed; dark mark on ball gives spin.</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Optional: OpenCV.js (not mandatory for baseline spin estimator) -->
+  <script async src="https://docs.opencv.org/4.7.0/opencv.js"></script>
+  <script>
+  // ---------- Utilities & UI ----------
+  const $ = s=>document.querySelector(s);
+  const logMsg = msg=>{ const elm=document.createElement('div'); elm.textContent=`${new Date().toLocaleTimeString()}  ${msg}`; $('#log').prepend(elm); };
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+
+  if (!(location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    logMsg("Camera may be blocked on mobile unless served via HTTPS or localhost.");
+  }
+
+  // ---------- Elements ----------
+  const el = {
+    clubSelect:$('#clubSelect'), sensitivity:$('#sensitivity'), arm:$('#arm'), takeShot:$('#takeShot'),
+    video:$('#video'), canvas:$('#hiddenCanvas'),
+    speed:$('#speed'), clubSpeed:$('#clubSpeed'), ballSpeed:$('#ballSpeed'), carry:$('#carry'), total:$('#total'),
+    spin:$('#spin'), spinEffect:$('#spinEffect'), result:$('#result'),
+    stage:$('#stage'), simBall:$('#simBall'), tip:$('#tip'), hud:$('#hud')
+  };
+
+  // ---------- Club Profiles (meters) + Launch/Spin Defaults ----------
+  const clubs = {
+    driver: { max:150, carryFrac:0.85, loftDeg:12, spinDefault:2600 },
+    wood3:  { max:135, carryFrac:0.84, loftDeg:15, spinDefault:3000 },
+    hybrid: { max:125, carryFrac:0.82, loftDeg:18, spinDefault:3500 },
+    iron5:  { max:110, carryFrac:0.80, loftDeg:27, spinDefault:5000 },
+    iron8:  { max: 85, carryFrac:0.78, loftDeg:36, spinDefault:7000 },
+    wedge:  { max: 65, carryFrac:0.70, loftDeg:48, spinDefault:9000 },
+    putter: { max: 10, carryFrac:0.05, loftDeg:3,  spinDefault: 200 }
+  };
+  const smashFactors = { driver:1.45, wood3:1.43, hybrid:1.40, iron5:1.38, iron8:1.35, wedge:1.30, putter:1.10 };
+
+  // ---------- Camera State ----------
+  let camStream=null, prevFrame=null, opencvReady=false;
+  let spinState = { lastAngle:null, rpm:0, side:0 };
+
+  window.Module = { onRuntimeInitialized: () => { opencvReady = true; logMsg('OpenCV ready: enhanced spin possible.'); } };
+
+  // ---------- Camera Control ----------
+  el.arm.onclick = async () => {
+    if (camStream) return;
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video:{ width:{ideal:640}, height:{ideal:360}, facingMode:{ideal:'environment'} }, audio:false
+      });
+      el.video.srcObject = camStream;
+      el.video.style.display = 'block';
+      el.takeShot.disabled = false;
+      logMsg('Camera armed.');
+    } catch(e){
+      logMsg('Camera error: '+e.name+' — '+e.message);
+    }
+  };
+
+  el.takeShot.onclick = async () => {
+    el.takeShot.disabled = true;
+    await countdown(3);
+    logMsg('Tracking swing for 6 seconds...');
+    resetSpin();
+    const highest = await trackHighestSpeed(6);
+    finishShot(highest);
+    el.takeShot.disabled = false;
+  };
+
+  const countdown = (sec)=> new Promise(res=>{ let t=sec; const id=setInterval(()=>{ logMsg(`Shot in ${t}...`); t--; if(t<0){clearInterval(id); res();} },1000) });
+
+  function resetSpin(){ spinState.lastAngle=null; spinState.rpm=0; spinState.side=0; }
+
+  // ---------- Motion + Spin Detection ----------
+  function trackHighestSpeed(durationSec){
+    return new Promise(resolve=>{
+      const ctx = el.canvas.getContext('2d');
+      let highest=0, start=Date.now();
+      const loop = () => {
+        if(!camStream){ resolve(highest); return; }
+        ctx.drawImage(el.video,0,0,640,360);
+        const frame = ctx.getImageData(0,0,640,360);
+        detectSpinAndSpeed(frame);
+        if (Date.now()-start < durationSec*1000) requestAnimationFrame(loop); else resolve(highest);
+      };
+
+      function detectSpinAndSpeed(frame){
+        if(prevFrame){
+          let diffSum=0, pxCount=0;
+          // Region of interest: middle-bottom where swing happens (reduce noise)
+          const w=640,h=360; const y0=Math.floor(h*0.45), y1=h; const x0=Math.floor(w*0.15), x1=Math.floor(w*0.85);
+          for(let y=y0;y<y1;y++){
+            for(let x=x0;x<x1;x++){
+              const i=(y*w+x)*4;
+              const r=Math.abs(frame.data[i]-prevFrame.data[i]);
+              const g=Math.abs(frame.data[i+1]-prevFrame.data[i+1]);
+              const b=Math.abs(frame.data[i+2]-prevFrame.data[i+2]);
+              // prefer bright pixels as ball/club reflections
+              if(frame.data[i]>200 && frame.data[i+1]>200 && frame.data[i+2]>200){ diffSum+=r+g+b; pxCount++; }
+            }
+          }
+          if(pxCount>5){
+            const avgSpeed = diffSum/pxCount; // proxy
+            if(avgSpeed>highest) highest=avgSpeed;
+          }
+          // cheap spin estimator: track darkest centroid within bright blob window & angle change
+          cheapSpinEstimator(frame, x0,y0,x1,y1);
+        }
+        prevFrame = frame;
+      }
+      loop();
+    });
+  }
+
+  function cheapSpinEstimator(frame,x0,y0,x1,y1){
+    // find bright area (ball/club), then find a darker dot within it to use as a logo marker
+    const w=640; const cx=(x0+x1)>>1; const cy=(y0+y1)>>1;
+    let sumBx=0,sumBy=0,countB=0; // bright centroid
+    let sumDx=0,sumDy=0,countD=0; // dark centroid (marker)
+    for(let y=y0;y<y1;y+=2){ // step 2 for speed
+      for(let x=x0;x<x1;x+=2){
+        const i=(y*w+x)*4, r=frame.data[i], g=frame.data[i+1], b=frame.data[i+2];
+        const lum = (r+g+b)/3;
+        if (lum>220){ sumBx+=x; sumBy+=y; countB++; }
+        else if (lum<60){ sumDx+=x; sumDy+=y; countD++; }
+      }
+    }
+    if(countB>80 && countD>10){
+      const bx=sumBx/countB, by=sumBy/countB;
+      const dx=sumDx/countD, dy=sumDy/countD;
+      const angle = Math.atan2(dy-by, dx-bx); // radians
+      if(spinState.lastAngle!=null){
+        let d = angle - spinState.lastAngle; // unwrap
+        while(d> Math.PI) d-=2*Math.PI; while(d<-Math.PI) d+=2*Math.PI;
+        const deg = d * 180/Math.PI; // degrees per frame
+        // Approx fps from rAF ~60; convert to RPM
+        const degPerSec = deg * 60;
+        const rpm = Math.abs(degPerSec/360) * 60;
+        // side spin sign (left/right) from sign of deg
+        spinState.side = Math.sign(deg);
+        // low-pass filter to smooth
+        spinState.rpm = 0.85*spinState.rpm + 0.15*clamp(rpm,0,12000);
+      }
+      spinState.lastAngle = angle;
+    }
+  }
+
+  // ---------- Physics Sim (carry/total, spin lift/side) ----------
+  function finishShot(avgSpeed){
+    const sensitivity=parseFloat(el.sensitivity.value);
+    const clubKey = el.clubSelect.value; const club = clubs[clubKey];
+
+    // Raw proxy speed -> km/h (tunable scalar)
+    const speedKmh = (avgSpeed*sensitivity*0.36).toFixed(1);
+    const clubSpeed = parseFloat(speedKmh);
+
+    const smash = smashFactors[clubKey] || 1.35;
+    const ballSpeed = +(clubSpeed*smash).toFixed(1); // km/h
+
+    // Spin estimate (fallback to club default if no marker found)
+    const estRPM = spinState.rpm>50 ? Math.round(spinState.rpm) : club.spinDefault;
+
+    // Launch angle influenced by loft & speed (simple model)
+    const launchDeg = clamp(club.loftDeg * (0.9 + 0.15*(clubSpeed/150)), 5, 50);
+
+    // Convert to m/s
+    const v0 = ballSpeed / 3.6;
+    const g = 9.81;
+
+    // Very simplified lift/drag from backspin
+    const spinCoef = clamp(estRPM/6000, 0.2, 2.0); // 1.0 around 6000 rpm
+    const liftGain = 1.0 + 0.35*(spinCoef-1.0); // modest increase in hang time
+
+    // Side curve from side spin sign
+    const sideDir = spinState.side || 0; // -1 left, +1 right
+
+    // Integrate flight in 2D (x forward, y height), with lateral offset z
+    const dt=1/120; let x=0,y=0,z=0; // meters
+    let vx=v0*Math.cos(launchDeg*Math.PI/180), vy=v0*Math.sin(launchDeg*Math.PI/180);
+    let t=0, airTime=0, maxY=0;
+
+    // Quick & cheerful drag model proportional to v^2 (small)
+    const Cd=0.22, A=0.0015, rho=1.2, m=0.0459; // rough golf ball params
+    function drag(ax,ay,vx,vy){
+      const v=Math.hypot(vx,vy); const Fd=0.5*Cd*rho*A*v*v; const axd = -Fd*vx/(m*(v+1e-6)); const ayd = -Fd*vy/(m*(v+1e-6));
+      return [axd, ayd];
+    }
+
+    while(true){
+      // Lift as reduced gravity (cartoon model):
+      const gy = g*(1.0-0.18*spinCoef); // backspin reduces net downward accel
+      let ax=0, ay=-gy*liftGain;
+      const [axd,ayd]=drag(ax,ay,vx,vy); ax+=axd; ay+=ayd;
+      // Side drift proportional to backspin & speed
+      const sideRate = 0.02*spinCoef*sideDir; // m lateral per second per m/s
+      z += sideRate*dt*v0;
+
+      // Integrate
+      vx += ax*dt; vy += ay*dt; x += vx*dt; y += vy*dt; t+=dt; maxY=Math.max(maxY,y);
+      if(y<=0 && t>0.05) { airTime=t; break; }
+      if(t>10) break; // safety
+    }
+
+    const carry = x; // meters
+
+    // Roll: depends on landing angle & spin (more backspin = less roll)
+    const landingAngle = Math.atan2(vy, vx); // vy is negative here
+    const rollBase = clamp( club.max*(1-Math.exp(-avgSpeed*0.012*sensitivity))*(1-club.carryFrac), 0, 60 );
+    const roll = rollBase * clamp(1.0 - (estRPM/8000), 0.25, 1.0);
+
+    // Update UI numbers
+    el.speed.textContent = (avgSpeed*sensitivity).toFixed(0)+' pxΔ';
+    el.clubSpeed.textContent = clubSpeed.toFixed(1)+' km/h';
+    el.ballSpeed.textContent = ballSpeed.toFixed(1)+' km/h';
+    el.carry.textContent = carry.toFixed(1)+' m';
+    el.total.textContent = (carry+roll).toFixed(1)+' m';
+    el.spin.textContent = `${estRPM} rpm (${sideDir<0?'draw/left':'fade/right'})`;
+    el.spinEffect.textContent = `lift x${liftGain.toFixed(2)} • side ${sideDir}`;
+    el.result.textContent='Shot recorded';
+
+    logMsg(`Shot ▶ club ${clubSpeed.toFixed(1)} km/h, ball ${ballSpeed.toFixed(1)} km/h, spin ${estRPM} rpm, carry ${carry.toFixed(1)} m, total ${(carry+roll).toFixed(1)} m.`);
+
+    // Animate ball on stage
+    animateBall(carry, roll, z, airTime, maxY);
+  }
+
+  function animateBall(carry, roll, z, airTime, maxY){
+    const stage = el.stage.getBoundingClientRect();
+    const teeX = 0.10, holeX = 0.82; // percents across width
+    const groundY = 0.88; // percent from top (where fairway is)
+
+    const total = carry+roll; const range = Math.max(1, total);
+    const px = (t)=> clamp( teeX + (t/range)*(holeX-teeX), 0, 1 );
+
+    // height map for arc: use a simple parabola scaled by maxY
+    let t=0; const flightTime = Math.max(airTime, 0.5);
+
+    function setBall(xp, yp){
+      el.simBall.style.left = (xp*100)+'%';
+      el.simBall.style.bottom = ( (1-yp)*100 )+'%';
+    }
+
+    // FLIGHT
+    const t0=performance.now();
+    function flight(now){
+      const dt=(now-t0)/1000; const r=clamp(dt/flightTime,0,1);
+      const xMeters = carry * r; // linear along x
+      const yMeters = 4*maxY*r*(1-r); // normalized parabola
+      const xp = teeX + (xMeters/(carry+roll+1e-6))*(holeX-teeX);
+      const yp = groundY - 0.32*yMeters; // scale to stage
+      setBall(xp, yp);
+      if(r<1) requestAnimationFrame(flight); else rollPhase();
+    }
+
+    // ROLL
+    function rollPhase(){
+      const startX = teeX + (carry/(carry+roll+1e-6))*(holeX-teeX);
+      const endX = teeX + ((carry+roll)/(carry+roll+1e-6))*(holeX-teeX);
+      const t0=performance.now(); const rollDur = Math.max(0.5, roll/25);
+      function step(now){
+        const r=clamp((now-t0)/1000/rollDur,0,1);
+        const xp = startX + (endX-startX)*r;
+        const yp = groundY;
+        setBall(xp, yp);
+        if(r<1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
+
+    requestAnimationFrame(flight);
+  }
+  </script>
+</body>
+</html>
